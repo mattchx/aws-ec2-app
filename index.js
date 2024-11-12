@@ -1,5 +1,6 @@
 const nodemailer = require("nodemailer");
-const aws = require("@aws-sdk/client-ses");
+const awsSES = require("@aws-sdk/client-ses");
+const { GetSecretValueCommand, SecretsManagerClient } = require("@aws-sdk/client-secrets-manager");
 const { isEmailValid } = require('./util')
 
 const express = require('express');
@@ -9,6 +10,28 @@ const port = 3000
 const dotenv = require('dotenv');
 
 dotenv.config()
+
+
+const secret_name = "nodemailer-ses-secrets";
+
+const client = new SecretsManagerClient({
+    region: "us-east-1",
+});
+
+let secrets;
+
+client.send(
+    new GetSecretValueCommand({
+        SecretId: secret_name,
+        VersionStage: "AWSCURRENT",
+    })
+)
+    .then((response) => {
+        secrets = JSON.parse(response.SecretString);
+    })
+    .catch((error) => {
+        throw error;
+    });
 
 // Add middleware to parse form data
 app.use(express.urlencoded({ extended: true }))
@@ -25,18 +48,18 @@ app.post('/mail', (req, res) => {
         res.status(400).send({ message: "Email is not valid" });
     }
 
-    const ses = new aws.SES({
+    const ses = new awsSES.SES({
         apiVersion: "2010-12-01",
         region: "us-east-1", // Your region will need to be updated
         credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY,
-            secretAccessKey: process.env.AWS_SECRET_KEY,
+            accessKeyId: secrets.ACCESS_KEY,
+            secretAccessKey: secrets.SECRET_KEY,
         },
     });
 
     // create Nodemailer SES transporter
     const transporter = nodemailer.createTransport({
-        SES: { ses, aws },
+        SES: { ses, aws: awsSES },
     });
 
     const sendMail = () => {
@@ -52,7 +75,7 @@ app.post('/mail', (req, res) => {
             // callback
             (error, info) => {
                 if (error) {
-                    console.error('Error sending email:', error);
+                    throw error('Error sending email:', error);
                 } else {
                     console.log('Email sent:', info.messageId);
                 }
